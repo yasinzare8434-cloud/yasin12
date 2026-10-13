@@ -1,0 +1,73 @@
+services:
+  db:
+    image: mysql:8.0
+    environment:
+      MYSQL_ROOT_PASSWORD: rootpass
+      MYSQL_DATABASE: wordpress
+      MYSQL_USER: wordpress
+      MYSQL_PASSWORD: wordpresspass
+    volumes:
+      - db_data:/var/lib/mysql
+    restart: on-failure
+    healthcheck:
+      test: ["CMD", "mysqladmin", "ping", "-h", "localhost", "-u", "root", "-prootpass"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+      start_period: 20s
+
+  wordpress:
+    image: wordpress:php8.2-apache
+    depends_on:
+      db:
+        condition: service_healthy
+    ports:
+      - "3000:80"
+    environment:
+      WORDPRESS_DB_HOST: db:3306
+      WORDPRESS_DB_USER: wordpress
+      WORDPRESS_DB_PASSWORD: wordpresspass
+      WORDPRESS_DB_NAME: wordpress
+      BASE44_PUBLIC_HOST_SUFFIX: ${BASE44_PUBLIC_HOST_SUFFIX}
+      BASE44_PREVIEW_MODE: ${BASE44_PREVIEW_MODE:-}
+      WORDPRESS_CONFIG_EXTRA: |
+        $$b44 = getenv('BASE44_PUBLIC_HOST_SUFFIX');
+        if ($$b44 && $$b44 !== '') {
+            define('WP_HOME', 'https://3000-' . $$b44);
+            define('WP_SITEURL', 'https://3000-' . $$b44);
+        }
+        if (getenv('BASE44_PREVIEW_MODE') === '1' || (isset($$_SERVER['HTTP_X_FORWARDED_PROTO']) && $$_SERVER['HTTP_X_FORWARDED_PROTO'] === 'https')) {
+            $$_SERVER['HTTPS'] = 'on';
+        }
+    volumes:
+      - wp_data:/var/www/html
+      - ./wp-content/themes/donya-ai:/var/www/html/wp-content/themes/donya-ai
+    restart: on-failure
+    healthcheck:
+      test: ["CMD-SHELL", "curl -sf http://localhost/wp-login.php || exit 1"]
+      interval: 15s
+      timeout: 5s
+      retries: 10
+      start_period: 30s
+
+  setup:
+    image: wordpress:cli
+    depends_on:
+      wordpress:
+        condition: service_healthy
+    environment:
+      WORDPRESS_DB_HOST: db:3306
+      WORDPRESS_DB_USER: wordpress
+      WORDPRESS_DB_PASSWORD: wordpresspass
+      WORDPRESS_DB_NAME: wordpress
+      WP_URL: "https://3000-${BASE44_PUBLIC_HOST_SUFFIX}"
+    volumes:
+      - wp_data:/var/www/html
+      - ./wp-content/themes/donya-ai:/var/www/html/wp-content/themes/donya-ai
+      - ./scripts:/scripts:ro
+    command: sh /scripts/setup.sh
+    restart: "no"
+
+volumes:
+  db_data:
+  wp_data:
